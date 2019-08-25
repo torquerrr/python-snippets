@@ -10,7 +10,7 @@ logger.setLevel(logging.INFO)
 sh = logging.StreamHandler(sys.stdout)
 sh.setLevel(logging.INFO)
 
-fmt = logging.Formatter('%(levelname)s::%(asctime)s::%(name)s - %(message)s')
+fmt = logging.Formatter('%(levelname)s::%(asctime)s::%(name)s::%(message)s')
 sh.setFormatter(fmt)
 
 logger.addHandler(sh)
@@ -21,32 +21,37 @@ logger.info('Test message')
 
 class MyLogger:
     def __init__(self, logger):
-        self.logger = logger
-        self.handlers = self.logger.handlers
-        self.level = self.logger.level
+        self.state = logger.__dict__
 
     def __getstate__(self):
         d = self.__dict__.copy()
-        if 'logger' in d:
-            d['logger'] = d['logger'].name
 
-            # Remove RLock to allow proper serialization
-            for handler in d['handlers']:
-                handler.lock = None
+        # Remove RLock to allow proper serialization
+        for handler in d['state']['handlers']:
+            handler.lock = None
+
+        # Remove unneeded objects
+        for k in ['parent', '_cache', 'manager']:
+            del d['state'][k]
 
         return d
 
     def __setstate__(self, d):
-        if 'logger' in d:
-            d['logger'] = logging.getLogger(d['logger'])
+        # Get new logger with previously saved name
+        d['logger'] = logging.getLogger(d['state']['name'])
 
-            # Restore RLock
-            for handler in d['handlers']:
-                handler.lock = threading.RLock()
+        # Restore RLock to ensure thread safety
+        for handler in d['state']['handlers']:
+            handler.lock = threading.RLock()
 
-            d['logger'].handlers = d['handlers']
-            d['logger'].level = d['level']
-            d['logger'].propagate = False
+        # Update logger with previously saved state
+        # and disable message propagation to parent
+        d['logger'].__dict__.update(d['state'])
+        d['logger'].propagate = False
+
+        # Cleanup
+        del d['state']
+
         self.__dict__.update(d)
 
 
